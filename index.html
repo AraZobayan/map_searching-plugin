@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#111827" />
+<title>沿线找店</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;   /* 老浏览器兜底 */
+    height: 100dvh;  /* iOS Safari：避开底部工具栏 */
+    overflow: hidden;
+    font: 14px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #111827;
+    background: #f3f4f6;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* 顶部输入区：独立一行，不压在地图上（地图占剩下的空间） */
+  #search-panel {
+    position: relative;
+    z-index: 1000;
+    flex: 0 0 auto;
+    padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .search-row { display: grid; gap: 8px; }
+  .fields { display: grid; gap: 8px; }
+  .field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    background: #f9fafb;
+  }
+  .field-label { flex: 0 0 auto; font-size: 12px; color: #6b7280; }
+  .field input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 42px;
+    border: 0;
+    background: transparent;
+    color: #111827;
+    /* 小于 16px 时 iOS 聚焦会自动放大页面，这里固定 16px */
+    font-size: 16px;
+    outline: none;
+  }
+  #search-btn {
+    min-height: 44px;
+    padding: 0 18px;
+    border: 0;
+    border-radius: 10px;
+    background: #2563eb;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  #search-btn:disabled { background: #93c5fd; }
+  @media (min-width: 560px) {
+    .search-row { grid-template-columns: 1fr auto; align-items: start; }
+    .fields { grid-template-columns: 1fr 1fr; }
+  }
+
+  #status { margin: 6px 2px 0; font-size: 12px; color: #6b7280; }
+  #status[hidden] { display: none; }
+
+  #notice {
+    margin: 8px 0 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  #notice[hidden] { display: none; }
+
+  #map-wrap { position: relative; flex: 1 1 auto; min-height: 0; }
+  #map { position: absolute; inset: 0; }
+
+  /* 底部结果面板：与地图分行，不覆盖地图 */
+  #result {
+    flex: 0 0 auto;
+    max-height: 42dvh;
+    overflow: auto;
+    padding: 0 12px calc(10px + env(safe-area-inset-bottom));
+    background: #fff;
+    border-top: 1px solid #e5e7eb;
+    -webkit-overflow-scrolling: touch;
+  }
+  #result[hidden] { display: none; }
+  .result-head {
+    position: sticky;
+    top: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 0;
+    background: #fff;
+  }
+  .result-head .summary { flex: 1 1 auto; min-width: 0; font-size: 13px; line-height: 1.45; }
+  #result-toggle, #fit-btn, #poi-open-btn {
+    flex: 0 0 auto;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    color: #374151;
+    font-size: 13px;
+  }
+  #fit-btn { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+  #poi-open-btn { color: #047857; border-color: #a7f3d0; background: #ecfdf5; }
+  #poi-open-btn[hidden] { display: none; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: #4b5563;
+  }
+  .legend i {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 4px;
+    border: 1px solid #fff;
+    border-radius: 50%;
+    vertical-align: middle;
+  }
+  .lg-transfer i { background: #dc2626; }
+  .lg-stop i { background: #1d4ed8; }
+  .lg-via i { background: #64748b; }
+  .lg-fallback i { background: #dc2626; border-radius: 2px; }
+  .legend [hidden] { display: none; }
+
+  .plan { padding: 8px 0; border-top: 1px solid #f3f4f6; font-size: 13px; }
+  .plan-title { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; }
+  .plan-color { flex: 0 0 auto; width: 12px; height: 12px; border-radius: 3px; }
+  .plan-meta { display: block; margin: 2px 0 0; color: #4b5563; font-size: 12px; }
+  /* 方案选择器：多方案时每条都可点，选中态高亮 */
+  .plan-item {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #fff;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+  .plan-item.plan-selected { border-color: #2563eb; background: #eff6ff; }
+  .plan-item:active { background: #f3f4f6; }
+  .station-list .empty { padding: 8px 2px; color: #6b7280; font-size: 13px; }
+
+  .station-list { margin: 0; padding: 0; list-style: none; }
+  .station-list li { border-top: 1px solid #f3f4f6; }
+  .station-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    width: 100%;
+    min-height: 44px;
+    padding: 6px 2px;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+  .station-name { font-weight: 500; }
+  .badge {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    border-radius: 999px;
+    color: #fff;
+    font-size: 11px;
+  }
+  .badge-transfer { background: #dc2626; }
+  .badge-stop { background: #1d4ed8; }
+  .badge-via { background: #64748b; }
+  .station-lines { flex: 0 0 100%; color: #6b7280; font-size: 12px; }
+  .station-row { display: flex; align-items: center; gap: 8px; }
+  .station-row .station-item { flex: 1 1 auto; }
+  .station-load {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 12px;
+  }
+
+  /* 查周边 */
+  #poi-panel { margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid #e5e7eb; }
+  #poi-panel[hidden] { display: none; }
+  .poi-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .poi-title { font-size: 13px; font-weight: 600; }
+  .poi-stats { color: #6b7280; font-size: 12px; }
+  .poi-categories { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; font-size: 13px; }
+  .poi-categories label { display: flex; align-items: center; gap: 4px; min-height: 44px; }
+  .poi-categories input { width: 18px; height: 18px; }
+  .poi-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+  .poi-controls select {
+    min-height: 44px;
+    padding: 0 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 14px;
+  }
+  #poi-query-btn {
+    min-height: 44px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 10px;
+    background: #059669;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  #poi-query-btn:disabled { background: #a7f3d0; }
+  #poi-notice {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 12px;
+  }
+  #poi-notice[hidden] { display: none; }
+  .poi-list { margin: 0; padding: 0; list-style: none; }
+  .poi-list li { border-top: 1px solid #f3f4f6; }
+  .poi-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    width: 100%;
+    min-height: 44px;
+    padding: 6px 2px;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+  .poi-name { font-weight: 500; }
+  .poi-cat {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: #ede9fe;
+    color: #6d28d9;
+    font-size: 11px;
+  }
+  .poi-meta { flex: 0 0 100%; color: #6b7280; font-size: 12px; }
+  .poi-list .empty { padding: 8px 2px; color: #6b7280; font-size: 13px; }
+
+  /* 店铺 marker：小方块，与站点圆点区分 */
+  .shop-mk { display: grid; place-items: center; width: 44px; height: 44px; }
+  .shop-dot {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #fff;
+    border-radius: 3px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+  }
+  .shop-hotel .shop-dot { background: #7c3aed; }
+  .shop-inn .shop-dot { background: #0891b2; }
+  .shop-market .shop-dot { background: #059669; }
+  .shop-massage .shop-dot { background: #d97706; }
+  .shop-food .shop-dot { background: #db2777; }
+  .shop-other .shop-dot { background: #6b7280; }
+  .mk-line .mk-dot { width: 8px; height: 8px; background: #94a3b8; }
+
+  /* 店铺详情卡：移动端底部抽屉，桌面居中浮层 */
+  .shop-card { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: flex-end; }
+  .shop-card[hidden] { display: none; }
+  .shop-card-backdrop { position: absolute; inset: 0; background: rgba(17, 24, 39, .45); }
+  .shop-card-sheet {
+    position: relative;
+    width: 100%;
+    max-height: 82dvh;
+    overflow: auto;
+    padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+    border-radius: 16px 16px 0 0;
+    background: #fff;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, .2);
+    -webkit-overflow-scrolling: touch;
+  }
+  @media (min-width: 600px) {
+    .shop-card { align-items: center; justify-content: center; padding: 24px; }
+    .shop-card-sheet { max-width: 520px; max-height: 80vh; border-radius: 16px; }
+  }
+  .shop-card-head { display: flex; align-items: flex-start; gap: 12px; }
+  .shop-card-titles { flex: 1 1 auto; min-width: 0; }
+  #shop-card-name { margin: 0; font-size: 17px; line-height: 1.35; }
+  #shop-card-sub { margin: 4px 0 0; color: #6b7280; font-size: 13px; }
+  #shop-card-close {
+    flex: 0 0 auto;
+    min-width: 44px;
+    min-height: 44px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    color: #374151;
+    font-size: 13px;
+  }
+  .shop-photos {
+    display: flex;
+    gap: 8px;
+    margin: 12px 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .shop-photos[hidden] { display: none; }
+  .shop-photos img {
+    flex: 0 0 auto;
+    width: 180px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 8px;
+    background: #f3f4f6;
+  }
+  .shop-rows { margin: 12px 0; }
+  .shop-row {
+    display: flex;
+    gap: 12px;
+    padding: 6px 0;
+    border-top: 1px solid #f3f4f6;
+    font-size: 14px;
+  }
+  .shop-row-label { flex: 0 0 72px; color: #6b7280; }
+  .shop-row-value { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+  .shop-row-value a { color: #1d4ed8; text-decoration: none; }
+  .shop-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .shop-card-ctrip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 180px;
+    min-height: 44px;
+    border-radius: 10px;
+    background: #2563eb;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .shop-card-copy {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    background: #fff;
+    color: #374151;
+    font-size: 14px;
+  }
+
+  /* 路线调试信息：默认收起，排查「有站点没线」时点开 */
+  .debug { margin: 8px 0 4px; border-top: 1px solid #f3f4f6; }
+  .debug summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    color: #6b7280;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .debug pre {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #f9fafb;
+    color: #374151;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .debug-label { display: block; margin: 0 0 4px; color: #6b7280; font-size: 12px; }
+  #debug-json, #debug-test-output {
+    display: block;
+    width: 100%;
+    min-height: 160px;
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    color: #111827;
+    font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    resize: vertical;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  #debug-test-output { min-height: 120px; }
+  .debug-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
+  .debug-copy {
+    min-height: 44px;
+    margin: 0;
+    padding: 0 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    color: #374151;
+    font-size: 13px;
+  }
+
+  /* 站点 marker：44×44 可点区域，里面一个彩色圆点 */
+  .mk { display: grid; place-items: center; width: 44px; height: 44px; }
+  .mk-dot {
+    border: 2px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+  }
+  .mk-transfer .mk-dot { width: 20px; height: 20px; background: #dc2626; }
+  .mk-stop .mk-dot { width: 16px; height: 16px; background: #1d4ed8; }
+  .mk-via .mk-dot { width: 11px; height: 11px; background: #64748b; }
+  .mk-endpoint .mk-dot {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .mk-origin .mk-dot { background: #059669; }
+  .mk-dest .mk-dot { background: #dc2626; }
+
+  .iw { min-width: 160px; font-size: 13px; line-height: 1.5; }
+  .iw strong { display: block; margin-bottom: 2px; font-size: 14px; }
+  .iw p { margin: 0; color: #4b5563; font-size: 12px; }
+
+  /* 高德补全下拉框要压在地图上面 */
+  .amap-sug-result, .amap-lib-autocomplete { z-index: 2000 !important; }
+
+  #error {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: none;
+    place-content: center;
+    padding: 24px;
+    background: #fff;
+  }
+  #error.show { display: grid; }
+  #error h2 { margin: 0 0 12px; font-size: 18px; }
+  #error pre {
+    margin: 0 0 14px;
+    padding: 14px;
+    border-radius: 10px;
+    background: #fef2f2;
+    color: #991b1b;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  #error p { margin: 0; color: #4b5563; font-size: 13px; }
+</style>
+</head>
+<body>
+  <header id="search-panel">
+    <div class="search-row">
+      <div class="fields">
+        <label class="field">
+          <span class="field-label">起点</span>
+          <input id="origin-input" type="text" placeholder="输入起点，如 深圳北站" autocomplete="off" enterkeyhint="next" />
+        </label>
+        <label class="field">
+          <span class="field-label">终点</span>
+          <input id="dest-input" type="text" placeholder="输入终点，如 深圳湾公园" autocomplete="off" enterkeyhint="search" />
+        </label>
+      </div>
+      <button id="search-btn" type="button">查询换乘方案</button>
+    </div>
+    <p id="status" hidden></p>
+    <p id="notice" role="alert" hidden></p>
+  </header>
+
+  <div id="map-wrap"><div id="map"></div></div>
+
+  <section id="result" hidden>
+    <div class="result-head">
+      <div class="summary" id="result-summary"></div>
+      <button id="poi-open-btn" type="button" hidden>查周边</button>
+      <button id="fit-btn" type="button">回到路线</button>
+      <button id="result-toggle" type="button" aria-expanded="true">收起</button>
+    </div>
+    <div id="result-body">
+      <section id="poi-panel" hidden>
+        <div class="poi-head">
+          <span class="poi-title">查周边</span>
+          <span class="poi-stats" id="poi-stats"></span>
+        </div>
+        <div class="poi-categories" id="poi-categories">
+          <label><input type="checkbox" value="酒店" checked />酒店</label>
+          <label><input type="checkbox" value="旅馆" />旅馆</label>
+          <label><input type="checkbox" value="超市" />超市</label>
+          <label><input type="checkbox" value="按摩" />按摩</label>
+          <label><input type="checkbox" value="美食" />美食</label>
+        </div>
+        <div class="poi-controls">
+          <label>半径
+            <select id="poi-radius">
+              <option value="400">400m</option>
+              <option value="800" selected>800m</option>
+              <option value="1200">1200m</option>
+              <option value="2000">2000m</option>
+            </select>
+          </label>
+          <button type="button" id="poi-query-btn">查询周边</button>
+        </div>
+        <p id="poi-notice" role="alert" hidden></p>
+        <ul class="poi-list" id="poi-list"></ul>
+      </section>
+      <p class="legend">
+        <span class="lg-transfer"><i></i>换乘站</span>
+        <span class="lg-stop"><i></i>上下车站</span>
+        <span class="lg-via"><i></i>途经站</span>
+        <span class="lg-fallback" id="legend-fallback" hidden><i></i>非真实路线（解析失败）</span>
+      </p>
+      <div id="plan-list"></div>
+      <ul class="station-list" id="station-list"></ul>
+      <details class="debug" id="debug-panel">
+        <summary>调试信息（路线没画出来时点开看）</summary>
+        <pre id="debug-text"></pre>
+        <label class="debug-label" for="debug-json">原始 JSON（前 8000 字符，可复制给开发者）</label>
+        <textarea id="debug-json" readonly spellcheck="false" placeholder="查询后显示 Transfer 原始返回"></textarea>
+        <div class="debug-actions">
+          <button type="button" id="debug-copy" class="debug-copy">复制原始 JSON</button>
+        </div>
+        <label class="debug-label" for="debug-test-output">途经站来源测试（依次试 LineSearch / StationSearch / PlaceSearch）</label>
+        <div class="debug-actions">
+          <button type="button" id="debug-test-via" class="debug-copy">测试途经站来源</button>
+          <button type="button" id="debug-test-copy" class="debug-copy">复制测试结果</button>
+        </div>
+        <textarea id="debug-test-output" readonly spellcheck="false" placeholder="点「测试途经站来源」后显示每次请求的 status / info / 条数 / 字段名"></textarea>
+      </details>
+    </div>
+  </section>
+
+  <div id="error">
+    <div>
+      <h2>地图加载失败</h2>
+      <pre id="error-text"></pre>
+      <p>检查 config.local.js 里的 key 与 securityJsCode；确认这个 key 的服务平台选的是「Web 端（JS API）」。</p>
+    </div>
+  </div>
+
+  <div id="shop-card" class="shop-card" hidden>
+    <div class="shop-card-backdrop" id="shop-card-backdrop"></div>
+    <section class="shop-card-sheet" id="shop-card-sheet" role="dialog" aria-modal="true" aria-labelledby="shop-card-name">
+      <div class="shop-card-head">
+        <div class="shop-card-titles">
+          <h2 id="shop-card-name"></h2>
+          <p id="shop-card-sub"></p>
+        </div>
+        <button id="shop-card-close" type="button" aria-label="关闭详情">关闭</button>
+      </div>
+      <div id="shop-card-photos" class="shop-photos" hidden></div>
+      <div id="shop-card-rows" class="shop-rows"></div>
+      <div class="shop-card-actions">
+        <a id="shop-card-ctrip" class="shop-card-ctrip" href="#" target="_blank" rel="noopener noreferrer">在携程搜这家</a>
+        <button id="shop-card-copy" class="shop-card-copy" type="button">复制店名</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="./config.local.js"></script>
+  <script src="https://webapi.amap.com/loader.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

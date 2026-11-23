@@ -1,0 +1,56 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+build/
+.vite/
+
+# 本地密钥与配置（高德 key 与安全密钥只放 config.local.js，绝不进仓库）
+.env
+.env.*
+*.local
+config.local.js
+*.local.js
+secrets.*
+
+# 图片、音频、视频不进仓库（.svg 例外，它是文本，用于界面图标）
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.avif
+*.bmp
+*.ico
+*.heic
+*.tif
+*.tiff
+*.raw
+*.psd
+*.mp3
+*.wav
+*.ogg
+*.m4a
+*.aac
+*.flac
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.flv
+assets/media/
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 日志与临时文件
+*.log
+tmp/
+
+# AgentTeams 运行状态（不是项目代码）
+.agent-teams/
